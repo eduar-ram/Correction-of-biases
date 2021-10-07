@@ -1,0 +1,128 @@
+library(haven)
+library(lme4)
+library(psych)
+library(lavaan)
+library(GPArotation)
+library(ggplot2)
+library(DiagrammeR)
+library(tidySEM)
+library(dplyr)
+
+
+
+datos <- read_sav("DATOS.sav")
+head(datos)
+#summary(datos)
+#describe(datos) #descriptivos
+
+
+
+#Vamos a realizar análisis multinivel para evaluar la variabilidad
+#de los distintos componentes de varianza
+#el análisis se realizará sobe puntuaicón total suma de los items 
+# TOTAL = SUMA ITEM1 A ITEM7
+# TT = SUMA it1 A it7 (SE APLICA CORRECIÓN POR LA MEDIA)
+# ITT = SUMA ite1 a ite7 (vaiables redondeadas a entero)
+
+
+HLM0 <- lmer( Tota ~ (1|Profesor), data = datos) #análisis multinivel para profesor
+#coef(HLM0) #ver la puntuación estimada para cada profesor
+summary(HLM0) #sale el siguiente resultado
+#Groups   Name        Variance Std.Dev.
+#Profesor (Intercept) 32.38    5.691   
+#Residual             40.44    6.360
+## S3 method for class 'merMod'
+
+plot(HLM0)
+# vemos que la varianza total 32.38+40.44 = 72.82, se divide en 
+# la que se debe a los profesores  32.38/72.82 = 0.4447 (44.47%) y
+# la que se debe a los estudiantes 40.44/72.82 = 0.5553 (55.53%)
+
+#LUEGO NO SE PUEDE DESPRECIAR LA FUENTE DE VARIABILIDAD DEBIDO
+#A LOS PROFESORES, ES PRECISO CONTROLARLA (PARA NO INFLAR LA FIABILIDAD, LOS PESOS FACTORIALES Y LOS PODERES DISCRIMINANTES)
+
+#SE HA REALIZADO UNA ALINEACIÓN LINEAL POR LA MEDIA (VER ARTÍCULO)
+#ESTE PROCEDIMIENTO CONSISTE EN HACER QUE TODOS LOS PROFESORES SE IGUALEN EN MEDIA, ITEM A ITEM
+
+#Vemos ahora que ya no hay efecto del profesor sobre 
+#la puntuación total "TT" de las nuevas variables it1,it2...
+HLM_0 <- lmer(TT ~ (1 | Profesor), data = datos)
+#coef(HLM_0) #ver como todos son iguales
+summary(HLM_0)
+#Profesor (Intercept)  0.0     0.000  (sale un warning por ser cero) 
+#Residual             35.8     5.984   
+plot(HLM_0)
+
+#Si hacemos un redondeo a entero de los items para poder
+#aplicar TRI, EL RESULTADO APENAS CAMBIA 
+HLM_1 <- lmer(ITT ~ (1 | Profesor), data = datos)
+#coef(HLM_1) #ver como todos son iguales
+summary(HLM_1)
+plot(HLM_1)
+
+
+
+#UNA VEZ ANALIZADO EL PROBLEMA HACEMOS LOS ANÁLISIS 
+DATO<-datos[c("ITEM1","ITEM2","ITEM3","ITEM4","ITEM5","ITEM6","ITEM7")]
+DATC<-datos[c("ite1","ite2","ite3","ite4","ite5","ite6","ite7")]
+
+fa.parallel(DATO) 
+fa.parallel(DATC) 
+#misma estructura del paralelo
+
+fa(DATO,1, cor="poly")
+fa(DATC,1, cor="poly") 
+
+#vemos que hay una pérdida importante en los pesos factoriales 
+omega(DATO, poly="T") #coeficiente alpha = 0.97
+omega(DATC, poly="T") #coeficiente alpha = 0.92
+#Hay una reducción de la fiabilidad, pero hay otro elemento interesante
+#mientras que la estructura factorial de los datos corregidos 
+#parece fomar una estructura multidimensional, en cuyo caso la fiabilidad baja a 0.86 (omega jerárquico)
+
+omega(DATO)  #con pearson, alpha =0.96
+omega(DATC)  #alpha = 0.90, omega jerárquico = 0.84
+# Vemos que la estructura trifactorial no se debe al tipo de correlación usada.
+
+#mardia(DATO) #si aplicamos mardia vemos que no se debe usar pearson
+#n.obs = 16950   num.vars =  7 
+#b1p =  7.42   skew =  20947.67  with probability =  0
+#small sample skew =  20952.31  with probability =  0
+#b2p =  100.88   kurtosis =  219.65  with probability =  0
+
+#mardia(DATC)
+#b1p =  3.22   skew =  9109.3  with probability =  0
+#small sample skew =  9111.31  with probability =  0
+#b2p =  88.72   kurtosis =  149.15  with probability =  0
+
+#Se reduce la asimetría y la curtosis en los datos corregidos, pero no se cumple 
+#el supuesto la normalidad multivariante para el uso de Pearson o de estimadores ML. 
+
+
+#SE PUEDE HACER EL ANÁLISIS CON AFC, PERO EL MODELO UNIDIMENSIONAL ES EQUIVALENTE EN AFC Y AFE
+ 
+model1 <- "F1 =~ ITEM1+ITEM2+ITEM3+ITEM4+ITEM5+ITEM6+ITEM7"
+fit <- cfa(model1, data=DATO, ordered=c("ITEM1","ITEM2","ITEM3","ITEM4",
+                                        "ITEM5","ITEM6","ITEM7")) 
+summary(fit, fit.measures=TRUE,standardized=T)
+
+model2 <- "F1 =~ ite1+ite2+ite3+ite4+ite5+ite6+ite7"
+fit <- cfa(model2, data=DATC, ordered=c("ite1","ite2","ite3","ite4","ite5","ite6","ite7"))
+summary(fit, fit.measures=TRUE, standardized=T)
+
+#LA ESTRUCTURA TRIDIMENSIONAL AJUSTA MUY BIEN, CIERTAMENTE LAS CORRELACIONES SON ALTA ENTRE FACTORES
+model2b <- "F1 =~ ite4+ite5+ite7
+            F2 =~ ite1+ite2
+            F3 =~ ite3+ite6"
+fit_3 <- cfa(model2b, data=DATC, ordered=c("ite1","ite2","ite3","ite4","ite5","ite6","ite7"))
+summary(fit_3, fit.measures=TRUE, standardized=T)
+
+
+prepare_graph(fit_3) %>%
+  color_pos_edges("green") %>%
+  color_neg_edges("red") %>%
+  color_var("black") %>%
+  alpha_var(.2) %>%
+  plot()
+
+
